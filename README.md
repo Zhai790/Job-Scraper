@@ -1,6 +1,6 @@
 # Job Board Monitor 🎯
 
-Automated job notification system that checks the [Lever job board](https://hire.lever.co/jobs/internal?location=Canada) daily and sends email alerts when junior/entry-level positions are posted.
+Automated job notification system that checks Lever job boards daily via the [Lever API](https://api.lever.co/v0/postings) and sends email alerts when junior/entry-level positions are posted.
 
 ## Features
 
@@ -106,12 +106,26 @@ Common schedules:
 
 Use [crontab.guru](https://crontab.guru/) to generate cron expressions.
 
-### Change Job Board URL
+### Add/Change Companies
 
-Edit the `JOB_BOARD_URL` in `monitor.py`:
+Edit the `COMPANIES` list in `monitor.py`:
 
 ```python
-JOB_BOARD_URL = "https://hire.lever.co/jobs/internal?location=Your-Location"
+COMPANIES = [
+    "magnetforensics",
+    "shopify",
+    "1password",
+]
+```
+
+To find a company's Lever name, visit their careers page. If it uses Lever, the URL will be `https://jobs.lever.co/{company-name}`.
+
+### Change Location
+
+Edit the `LOCATION` variable in `monitor.py`:
+
+```python
+LOCATION = "Canada"  # or "Remote", "Toronto", etc.
 ```
 
 ## Local Testing

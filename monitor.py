@@ -18,7 +18,13 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 # Configuration
-JOB_BOARD_URL = "https://hire.lever.co/jobs/internal?location=Canada"
+# You can monitor multiple companies by adding them to this list
+# Find company names from their Lever job board URL
+COMPANIES = [
+    "magnetforensics",  # Example - replace with your target company
+]
+
+LOCATION = "Canada"  # Filter by location
 SEEN_JOBS_FILE = Path(__file__).parent / "seen_jobs.json"
 
 # Keywords to match (case-insensitive)
@@ -62,61 +68,50 @@ def save_seen_jobs(job_ids: Set[str]):
         print(f"Error: Could not save seen jobs file: {e}")
 
 
-def fetch_job_board() -> str:
-    """Fetch the job board HTML"""
+def fetch_jobs_from_api(company: str) -> List[Dict[str, str]]:
+    """Fetch jobs from Lever's public API for a specific company"""
+    url = f"https://api.lever.co/v0/postings/{company}"
+    if LOCATION:
+        url += f"?location={LOCATION}"
+
     try:
         req = Request(
-            JOB_BOARD_URL,
+            url,
             headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
         )
         with urlopen(req, timeout=30) as response:
-            return response.read().decode('utf-8')
+            data = json.loads(response.read().decode('utf-8'))
+
+        if not isinstance(data, list):
+            print(f"Warning: Unexpected response format for {company}")
+            return []
+
+        jobs = []
+        for job_data in data:
+            # Extract location from categories
+            categories = job_data.get('categories', {})
+            location = categories.get('location', 'Remote')
+            commitment = categories.get('commitment', 'Full-time')
+
+            jobs.append({
+                'id': job_data.get('id', ''),
+                'title': job_data.get('text', 'Unknown'),
+                'url': job_data.get('hostedUrl', ''),
+                'location': location,
+                'commitment': commitment,
+                'company': company
+            })
+
+        return jobs
+
     except (HTTPError, URLError) as e:
-        print(f"Error fetching job board: {e}")
-        sys.exit(1)
-
-
-def parse_jobs(html: str) -> List[Dict[str, str]]:
-    """
-    Parse job listings from Lever HTML
-    Returns list of dicts with: id, title, url, location, commitment
-    """
-    jobs = []
-
-    # Lever uses data-qa-posting-id for job postings
-    # Pattern: <a class="posting" ... data-qa-posting-id="..." href="...">
-    posting_pattern = re.compile(
-        r'<a[^>]*class="[^"]*posting[^"]*"[^>]*'
-        r'data-qa-posting-id="([^"]+)"[^>]*'
-        r'href="([^"]+)"[^>]*>.*?'
-        r'<h5[^>]*>([^<]+)</h5>.*?'
-        r'(?:<span[^>]*class="[^"]*location[^"]*"[^>]*>([^<]*)</span>)?.*?'
-        r'(?:<span[^>]*class="[^"]*commitment[^"]*"[^>]*>([^<]*)</span>)?',
-        re.DOTALL | re.IGNORECASE
-    )
-
-    for match in posting_pattern.finditer(html):
-        job_id = match.group(1).strip()
-        url = match.group(2).strip()
-        title = match.group(3).strip()
-        location = match.group(4).strip() if match.group(4) else "Remote"
-        commitment = match.group(5).strip() if match.group(5) else "Full-time"
-
-        # Make URL absolute if relative
-        if url.startswith('/'):
-            url = f"https://hire.lever.co{url}"
-
-        jobs.append({
-            'id': job_id,
-            'title': title,
-            'url': url,
-            'location': location,
-            'commitment': commitment
-        })
-
-    return jobs
+        print(f"Error fetching jobs for {company}: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON for {company}: {e}")
+        return []
 
 
 def filter_matching_jobs(jobs: List[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -156,7 +151,9 @@ def send_email_notification(new_jobs: List[Dict[str, str]]):
     # Plain text version
     text_body = f"Found {len(new_jobs)} new job posting(s):\n\n"
     for job in new_jobs:
+        company = job.get('company', 'Unknown Company')
         text_body += f"• {job['title']}\n"
+        text_body += f"  Company: {company.title()}\n"
         text_body += f"  Location: {job['location']} | {job['commitment']}\n"
         text_body += f"  Matched: {job['matched_keyword']}\n"
         text_body += f"  Apply: {job['url']}\n\n"
@@ -171,12 +168,14 @@ def send_email_notification(new_jobs: List[Dict[str, str]]):
     """
 
     for job in new_jobs:
+        company = job.get('company', 'Unknown Company')
         html_body += f"""
         <div style="margin-bottom: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 5px;">
           <h3 style="margin-top: 0; color: #2c3e50;">
             <a href="{job['url']}" style="color: #3498db; text-decoration: none;">{job['title']}</a>
           </h3>
           <p style="margin: 5px 0;">
+            <strong>Company:</strong> {company.title()} |
             <strong>Location:</strong> {job['location']} |
             <strong>Type:</strong> {job['commitment']}
           </p>
@@ -191,10 +190,10 @@ def send_email_notification(new_jobs: List[Dict[str, str]]):
         </div>
         """
 
-    html_body += f"""
+    html_body += """
         <hr style="border: 1px solid #ddd;">
         <p style="color: #7f8c8d; font-size: 12px;">
-          Automated by Job Monitor | <a href="{JOB_BOARD_URL}">View all jobs</a>
+          Automated by Job Monitor
         </p>
       </body>
     </html>
@@ -218,19 +217,24 @@ def send_email_notification(new_jobs: List[Dict[str, str]]):
 def main():
     """Main execution flow"""
     print(f"[{datetime.now().isoformat()}] Starting job monitor...")
-    print(f"Checking: {JOB_BOARD_URL}")
+    print(f"Companies: {', '.join(COMPANIES)}")
+    print(f"Location: {LOCATION}")
     print(f"Keywords: {', '.join(KEYWORDS)}")
 
     # Load seen jobs
     seen_jobs = load_seen_jobs()
     print(f"Previously seen jobs: {len(seen_jobs)}")
 
-    # Fetch and parse jobs
-    print("Fetching job board...")
-    html = fetch_job_board()
+    # Fetch jobs from all companies
+    print("\nFetching jobs...")
+    all_jobs = []
+    for company in COMPANIES:
+        print(f"  Checking {company}...")
+        company_jobs = fetch_jobs_from_api(company)
+        print(f"    Found {len(company_jobs)} jobs")
+        all_jobs.extend(company_jobs)
 
-    all_jobs = parse_jobs(html)
-    print(f"Found {len(all_jobs)} total job postings")
+    print(f"\nTotal jobs found: {len(all_jobs)}")
 
     # Filter matching jobs
     matching_jobs = filter_matching_jobs(all_jobs)
@@ -243,7 +247,7 @@ def main():
     if new_jobs:
         print("\nNew job postings:")
         for job in new_jobs:
-            print(f"  • {job['title']} ({job['matched_keyword']})")
+            print(f"  • {job['title']} at {job.get('company', 'Unknown')} ({job['matched_keyword']})")
             print(f"    {job['url']}")
 
         # Send notification
