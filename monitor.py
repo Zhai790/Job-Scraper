@@ -33,10 +33,6 @@ KEYWORDS = [
     "new grad",
     "entry level",
     "associate",
-    "intern",
-    "internship",
-    "co-op",
-    "coop",
     "graduate",
     "early career",
 ]
