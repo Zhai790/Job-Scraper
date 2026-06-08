@@ -25,3 +25,4 @@ Thumbs.db
 # Local testing
 .env
 test_output/
+test_*.py
